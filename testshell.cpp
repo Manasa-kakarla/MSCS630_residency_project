@@ -59,6 +59,8 @@ const int MEMORY_SIZE = 4;  // Simulated memory size
 unordered_map<int, string> memory;  // Holds pages in memory (key = page_id, value = process_name)
 
 queue<int> fifoQueue;  // FIFO page replacement queue
+vector<string> memoryAllocationLog;  // To track page allocations
+vector<string> memoryDeallocationLog;  // To track page deallocations
 map<int, chrono::steady_clock::time_point> lruTime;  // LRU timestamps for page access
 
 // Function to simulate Producer-Consumer problem
@@ -117,36 +119,79 @@ void philosopher(int id) {
     }
 }
 
+// Function to print the current memory state
+void printMemoryState() {
+    cout << "Current Memory State: ";
+    for (const auto& entry : memory) {
+        cout << "Page " << entry.first << " (Process " << entry.second << ") ";
+    }
+    cout << endl;
+}
+
 // FIFO Page Replacement Algorithm
 void fifoPageReplacement(int page_id, const string& process_name) {
+    // Check if the page is already in memory (no page fault)
+    if (memory.find(page_id) != memory.end()) {
+        cout << "Page " << page_id << " is already in memory from process " << process_name << endl;
+        return;
+    }
+    // Simulate a page fault (page not in memory)
+    cout << "Page Fault: Page " << page_id << " is not in memory. Replacing page..." << endl;
     if (memory.size() >= MEMORY_SIZE) {
         // Memory is full, remove the oldest page (FIFO)
         int oldestPage = fifoQueue.front();
         fifoQueue.pop();
-        memory.erase(oldestPage);
+	memoryDeallocationLog.push_back("Deallocated page " + to_string(oldestPage) + " from process " + memory[oldestPage]);
         cout << "FIFO: Replaced page " << oldestPage << " with new page " << page_id << " from process " << process_name << endl;
+        memory.erase(oldestPage);
     }
 
     memory[page_id] = process_name;
+
     fifoQueue.push(page_id);
+    memoryAllocationLog.push_back("Allocated page " + to_string(page_id) + " from process " + process_name);
+
+    // Print the current state of memory
+    printMemoryState();
 }
 
 // LRU Page Replacement Algorithm
 void lruPageReplacement(int page_id, const string& process_name) {
+    // Page fault: If page is not found in memory
+    if (memory.find(page_id) == memory.end()) {
+        cout << "Page Fault: Page " << page_id << " is not in memory. Replacing page..." << endl;
+
     if (memory.size() >= MEMORY_SIZE) {
         // Memory is full, remove the least recently used page (LRU)
         auto leastRecentlyUsed = min_element(lruTime.begin(), lruTime.end(),
             [](const pair<int, chrono::steady_clock::time_point>& a, const pair<int, chrono::steady_clock::time_point>& b) {
                 return a.second < b.second;  // Compare timestamps
             });
+
         int lruPage = leastRecentlyUsed->first;
-        memory.erase(lruPage);
-        lruTime.erase(lruPage);
         cout << "LRU: Replaced page " << lruPage << " with new page " << page_id << " from process " << process_name << endl;
+        // Deallocate the least recently used page
+	memory.erase(lruPage);
+        lruTime.erase(lruPage);
+	cout << "Deallocated page " << lruPage << endl;  // Log deallocation
     }
 
     memory[page_id] = process_name;
     lruTime[page_id] = chrono::steady_clock::now();  // Update access time for LRU
+    
+    cout << "Allocated page " << page_id << " from process " << process_name << endl;
+    } else {
+        // If the page is already in memory, update its access time
+        lruTime[page_id] = steady_clock::now();
+        cout << "Page " << page_id << " accessed by process " << process_name << " (no page fault)" << endl;
+    }
+    
+    // Log current memory state
+    cout << "Current Memory State: ";
+    for (const auto& entry : memory) {
+        cout << "Page " << entry.first << " (Process " << entry.second << ") ";
+    }
+    cout << endl;
 }
 
 // Track memory usage for processes
