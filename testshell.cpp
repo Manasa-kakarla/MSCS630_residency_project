@@ -11,6 +11,11 @@
 #include <fstream>
 #include <sys/stat.h>
 #include <queue>
+#include <mutex>
+#include <semaphore.h>
+#include <unordered_map>
+#include <condition_variable>
+#include <map>
 #include <functional>
 #include <thread>  // For simulating sleep
 #include <chrono>  // For sleep duration
@@ -37,6 +42,136 @@ struct Job {
 // Job list for background processes
 vector<Job> jobList;
 int timeSlice = 3;  // Default time slice for round-robin scheduling (in seconds)
+
+// Global variables for synchronization
+mutex memoryMutex;  // Mutex to ensure exclusive access to memory
+sem_t memorySemaphore;  // Semaphore for limiting access to memory resources
+mutex producerConsumerMutex;  // Mutex for producer-consumer
+condition_variable cvProducer, cvConsumer;  // Condition variables for producer-consumer
+
+// Simulated buffer for producer-consumer
+const int BUFFER_SIZE = 5;
+queue<int> buffer;  // Shared buffer
+int itemsProduced = 0, itemsConsumed = 0;  // Track number of items produced and consumed
+
+// Simulated memory system
+const int MEMORY_SIZE = 4;  // Simulated memory size
+unordered_map<int, string> memory;  // Holds pages in memory (key = page_id, value = process_name)
+
+queue<int> fifoQueue;  // FIFO page replacement queue
+map<int, chrono::steady_clock::time_point> lruTime;  // LRU timestamps for page access
+
+// Function to simulate Producer-Consumer problem
+void producer() {
+    while (true) {
+        this_thread::sleep_for(chrono::seconds(1));  // Simulate work time
+
+        unique_lock<mutex> lock(producerConsumerMutex);
+        cvProducer.wait(lock, []() { return buffer.size() < BUFFER_SIZE; });  // Wait if buffer is full
+
+        // Produce an item
+        buffer.push(++itemsProduced);
+        cout << "Produced item " << itemsProduced << endl;
+
+        // Notify consumer that an item is available
+        cvConsumer.notify_one();
+    }
+}
+
+void consumer() {
+    while (true) {
+        this_thread::sleep_for(chrono::seconds(2));  // Simulate work time
+
+        unique_lock<mutex> lock(producerConsumerMutex);
+        cvConsumer.wait(lock, []() { return !buffer.empty(); });  // Wait if buffer is empty
+
+        // Consume an item
+        int item = buffer.front();
+        buffer.pop();
+        cout << "Consumed item " << item << endl;
+
+        // Notify producer that space is available
+        cvProducer.notify_one();
+    }
+}
+
+// Simulate Dining Philosophers Problem
+const int NUM_PHILOSOPHERS = 5;
+mutex forks[NUM_PHILOSOPHERS];  // Mutex for each fork
+
+void philosopher(int id) {
+    while (true) {
+        // Think (simulated by sleep)
+        this_thread::sleep_for(chrono::seconds(1));
+        cout << "Philosopher " << id << " is thinking." << endl;
+
+        // Pick up the left fork and right fork
+        lock(forks[id], forks[(id + 1) % NUM_PHILOSOPHERS]);  // Lock two forks
+        cout << "Philosopher " << id << " is eating." << endl;
+
+        this_thread::sleep_for(chrono::seconds(2));  // Simulate eating
+
+        // Release the forks
+        forks[id].unlock();
+        forks[(id + 1) % NUM_PHILOSOPHERS].unlock();
+    }
+}
+
+// FIFO Page Replacement Algorithm
+void fifoPageReplacement(int page_id, const string& process_name) {
+    if (memory.size() >= MEMORY_SIZE) {
+        // Memory is full, remove the oldest page (FIFO)
+        int oldestPage = fifoQueue.front();
+        fifoQueue.pop();
+        memory.erase(oldestPage);
+        cout << "FIFO: Replaced page " << oldestPage << " with new page " << page_id << " from process " << process_name << endl;
+    }
+
+    memory[page_id] = process_name;
+    fifoQueue.push(page_id);
+}
+
+// LRU Page Replacement Algorithm
+void lruPageReplacement(int page_id, const string& process_name) {
+    if (memory.size() >= MEMORY_SIZE) {
+        // Memory is full, remove the least recently used page (LRU)
+        auto leastRecentlyUsed = min_element(lruTime.begin(), lruTime.end(),
+            [](const pair<int, chrono::steady_clock::time_point>& a, const pair<int, chrono::steady_clock::time_point>& b) {
+                return a.second < b.second;  // Compare timestamps
+            });
+        int lruPage = leastRecentlyUsed->first;
+        memory.erase(lruPage);
+        lruTime.erase(lruPage);
+        cout << "LRU: Replaced page " << lruPage << " with new page " << page_id << " from process " << process_name << endl;
+    }
+
+    memory[page_id] = process_name;
+    lruTime[page_id] = chrono::steady_clock::now();  // Update access time for LRU
+}
+
+// Track memory usage for processes
+void trackMemoryUsage(int process_id) {
+    lock_guard<mutex> lock(memoryMutex);  // Ensure exclusive access to memory
+
+    if (memory.size() > MEMORY_SIZE) {
+        cout << "Memory overflow! Starting page replacement." << endl;
+        fifoPageReplacement(process_id, "Process_" + to_string(process_id));  // Example: FIFO replacement
+    } else {
+        cout << "Memory usage by process " << process_id << ": " << memory.size() << " pages" << endl;
+    }
+}
+
+// Handle synchronization using mutexes or semaphores
+void synchronizeMemoryAccess(int process_id) {
+    sem_wait(&memorySemaphore);  // Wait for semaphore to gain access
+    cout << "Process " << process_id << " is accessing shared memory." << endl;
+
+    // Simulate memory usage
+    trackMemoryUsage(process_id);
+
+    // Release semaphore
+    sem_post(&memorySemaphore);
+}
 
 // Function to execute a command in the background
 void executeCommandInBackground(const std::vector<std::string>& args) {
@@ -76,6 +211,29 @@ void executeCommandInBackground(const std::vector<std::string>& args) {
 }
 
 void printPerformanceMetrics();
+// Paging system simulation
+void pagingSystem(int numPages) {
+    cout << "Paging System: Simulating page allocation for " << numPages << " pages." << endl;
+
+    vector<int> pages(numPages, -1);  // Simulating pages with -1 indicating free pages
+
+    // Randomly allocate pages
+    for (int i = 0; i < numPages; ++i) {
+        pages[i] = rand() % 1000;  // Assigning a random value as the content of the page
+    }
+
+    cout << "Pages allocated:" << endl;
+    for (int i = 0; i < numPages; ++i) {
+        cout << "Page " << i << ": " << pages[i] << endl;
+    }
+
+    // Simulating page deallocation
+    cout << "Deallocating pages..." << endl;
+    for (int i = 0; i < numPages; ++i) {
+        pages[i] = -1;
+        cout << "Page " << i << " deallocated." << endl;
+    }
+}
 
 // Round-Robin Scheduling Algorithm
 void roundRobinScheduling() {
@@ -204,6 +362,58 @@ void priorityScheduling() {
 bool executeBuiltInCommand(const vector<string>& args) {
     if (args[0] == "exit") {
         exit(0);
+    } else if (args[0] == "fifo") {
+        // Execute FIFO Page Replacement Algorithm
+        cout << "Executing FIFO page replacement algorithm." << endl;
+        // For now, simulate replacing a page with a new page ID
+        fifoPageReplacement(1, "Process_1");
+        return true;
+    } else if (args[0] == "lru") {
+        // Execute LRU Page Replacement Algorithm
+        cout << "Executing LRU page replacement algorithm." << endl;
+        // Simulate LRU page replacement
+        lruPageReplacement(2, "Process_2");
+        return true;
+    } else if (args[0] == "track-memory") {
+        if (args.size() < 2) {
+            cerr << "track-memory: Missing process ID argument" << endl;
+            return true;
+        }
+        int process_id = stoi(args[1]);
+        trackMemoryUsage(process_id);  // Track memory usage for a specific process
+        return true;
+    } else if (args[0] == "sync-memory") {
+        if (args.size() < 2) {
+            cerr << "sync-memory: Missing process ID argument" << endl;
+            return true;
+        }
+        int process_id = stoi(args[1]);
+        synchronizeMemoryAccess(process_id);  // Synchronize memory access for a process
+        return true;
+    } else if (args[0] == "producer-consumer") {
+        // Start producer-consumer problem
+        cout << "Starting Producer-Consumer simulation." << endl;
+        thread producerThread(producer);
+        thread consumerThread(consumer);
+        producerThread.join();
+        consumerThread.join();
+        return true;
+    } else if (args[0] == "dining-philosophers") {
+        // Start Dining Philosophers problem
+        cout << "Starting Dining Philosophers simulation." << endl;
+        vector<thread> philosopherThreads;
+        for (int i = 0; i < NUM_PHILOSOPHERS; ++i) {
+            philosopherThreads.push_back(thread(philosopher, i));
+        }
+        for (auto& t : philosopherThreads) {
+            t.join();
+        }
+	return true;
+    } else if (args[0] == "jobs") {
+        // List background jobs (same as before)
+        for (size_t i = 0; i < jobList.size(); ++i) {
+            cout << "[" << i + 1 << "] PID: " << jobList[i].pid << " Command: " << jobList[i].command << endl;
+        }
     } else if (args[0] == "pwd") {
         char cwd[1024];
         if (getcwd(cwd, sizeof(cwd)) != NULL) {
@@ -453,6 +663,9 @@ vector<string> parseInput(const string& input) {
 // Main shell loop
 int main() {
     string input;
+    // Initialize the semaphore for synchronization
+    sem_init(&memorySemaphore, 0, 1);  // Binary semaphore to control access
+
     while (true) {
         cout << "> ";
         getline(cin, input);
