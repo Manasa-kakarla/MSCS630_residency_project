@@ -4,6 +4,7 @@
 #include <sstream>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <cstring>
 #include <dirent.h>
@@ -22,6 +23,113 @@
 
 using namespace std;
 using namespace chrono;
+
+struct User {
+    string username;
+    string password;
+    string role;  // "admin" or "user"
+};
+
+// Define file permissions
+enum FilePermission {
+    READ = 4,  // 4 -> read permission
+    WRITE = 2, // 2 -> write permission
+    EXECUTE = 1 // 1 -> execute permission
+};
+
+// File structure with permissions
+struct File {
+    string name;
+    int permissions;  // sum of READ, WRITE, EXECUTE
+};
+
+// Simulated list of users (username, password, and role)
+unordered_map<string, User> users = {
+    {"admin", {"admin", "admin123", "admin"}},
+    {"user1", {"user1", "password1", "user"}},
+    {"user2", {"user2", "password2", "user"}}
+};
+
+// Simulated list of files and their permissions (in octal format)
+unordered_map<string, File> files = {
+    {"sample.txt", {"sample.txt", READ | WRITE}},
+    {"system.conf", {"system.conf", READ | WRITE | EXECUTE}},
+    {"script.sh", {"script.sh", READ | EXECUTE}},
+    {"admin_data.txt", {"admin_data.txt", READ | WRITE | EXECUTE}}
+};
+
+User currentUser;
+
+bool isAuthenticated = false;
+
+//Function to log in the user
+bool login() {
+    string username, password;
+
+    // Prompt user for username and password
+    cout << "Enter username: ";
+    cin >> username;
+
+    cout << "Enter password: ";
+    cin >> password;
+
+    // Check if the username exists
+    if (users.find(username) != users.end()) {
+        // Validate password
+        if (users[username].password == password) {
+            currentUser = users[username];  // Store the logged-in user
+            cout << "Login successful!" << endl;
+            return true;
+        } else {
+            cout << "Invalid password!" << endl;
+            return false;
+        }
+    } else {
+        cout << "Username not found!" << endl;
+        return false;
+    }
+}
+
+// Check if the user has permission to perform the operation on the file
+bool hasPermission(const string& filename, int requiredPermission) {
+    if (files.find(filename) == files.end()) {
+        cout << "File does not exist!" << endl;
+        return false;
+    }
+
+    int userPermissions = files[filename].permissions;
+
+    // Admin has all permissions
+    if (currentUser.role == "admin") {
+        return true;
+    }
+
+    // For standard users, we only check for read, write, or execute permission based on the operation
+    if (requiredPermission & userPermissions) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+void showCommands() {
+    // Display commands based on user role
+    if (currentUser.role == "admin") {
+        cout << "Available commands (Admin):" << endl;
+        cout << "1. ls - List files" << endl;
+        cout << "2. cd - Change directory" << endl;
+        cout << "3. cat - Display file content" << endl;
+        cout << "4. rm - Remove file" << endl;
+        cout << "5. add-user - Add a new user" << endl;
+        cout << "6. exit - Exit the shell" << endl;
+    } else if (currentUser.role == "user") {
+        cout << "Available commands (User):" << endl;
+        cout << "1. ls - List files" << endl;
+        cout << "2. cd - Change directory" << endl;
+        cout << "3. cat - Display file content" << endl;
+        cout << "4. exit - Exit the shell" << endl;
+    }
+}
 
 // Structure to represent a job in the background
 struct Job {
@@ -63,6 +171,18 @@ vector<string> memoryAllocationLog;  // To track page allocations
 vector<string> memoryDeallocationLog;  // To track page deallocations
 map<int, chrono::steady_clock::time_point> lruTime;  // LRU timestamps for page access
 
+// Function to split a string into a vector of strings by a delimiter
+vector<string> splitString(const string& str, char delimiter) {
+    vector<string> result;
+    stringstream ss(str);
+    string token;
+    while (getline(ss, token, delimiter)) {
+        result.push_back(token);
+    }
+    return result;
+}
+
+void executeCommand(const vector<string>& args, bool isBackground);
 // Function to simulate Producer-Consumer problem
 void producer() {
     while (true) {
@@ -614,7 +734,225 @@ void killJob(int jobId) {
 
 // Function to execute external commands
 void executeCommand(const vector<string>& args, bool isBackground) {
-   
+    string command;
+    if (command == "exit") {
+        cout << "Exiting shell..." << endl;
+        exit(0);
+    }
+    else if (command == "ls") {
+        cout << "Listing files..." << endl;
+        // Simulate 'ls' command for the demo
+    }
+    else if (command == "cd") {
+        cout << "Changing directory..." << endl;
+        // Simulate 'cd' command for the demo
+    }
+    else if (command == "cat") {
+        cout << "Displaying file content..." << endl;
+        // Simulate 'cat' command for the demo
+    }
+    else if (command == "rm" && currentUser.role == "admin") {
+        cout << "Removing file..." << endl;
+        // Simulate 'rm' command for admin users
+    }
+    else if (command == "add-user" && currentUser.role == "admin") {
+        string username, password, role;
+        cout << "Enter new username: ";
+        cin >> username;
+        cout << "Enter new password: ";
+        cin >> password;
+        cout << "Enter role (admin/user): ";
+        cin >> role;
+        users[username] = {username, password, role};
+        cout << "New user added successfully!" << endl;
+    }
+    else {
+        cout << "Unknown command or insufficient permissions!" << endl;
+    }
+
+    if (!isAuthenticated) {
+        cout << "You must log in first!" << endl;
+        return;
+    }
+
+    if (args[0] == "cat") {
+        if (args.size() < 2) {
+            cout << "No file specified!" << endl;
+            return;
+        }
+
+        string filename = args[1];
+        // Check if user has read permission
+        if (hasPermission(filename, READ)) {
+            cout << "Displaying file: " << filename << endl;
+            // Simulate file content display
+            cout << "File content: This is a sample file content." << endl;
+        } else {
+            cout << "Permission denied: You do not have read access to " << filename << endl;
+        }
+    }
+    else if (args[0] == "echo") {
+        if (args.size() < 3) {
+            cout << "Invalid command format!" << endl;
+            return;
+        }
+
+        string filename = args[1];
+        // Check if user has write permission
+        if (hasPermission(filename, WRITE)) {
+            cout << "Writing to file: " << filename << endl;
+            // Simulate file writing
+            cout << "Content: " << args[2] << endl;
+        } else {
+            cout << "Permission denied: You do not have write access to " << filename << endl;
+        }
+    }
+    else if (args[0] == "rm") {
+        if (args.size() < 2) {
+            cout << "No file specified!" << endl;
+            return;
+        }
+
+        string filename = args[1];
+        // Check if user has write permission (since deleting requires write permission)
+        if (hasPermission(filename, WRITE)) {
+            cout << "Deleting file: " << filename << endl;
+            // Simulate file deletion
+            cout << "File " << filename << " deleted successfully." << endl;
+        } else {
+            cout << "Permission denied: You do not have write access to " << filename << endl;
+        }
+    }
+    else {
+        cout << "Unknown command!" << endl;
+    }
+    // First, check if it's a built-in command
+    if (executeBuiltInCommand(args)) {
+        return;  // If it's a built-in command, no need to proceed with execvp
+    }
+    // Check if piping is involved
+    size_t pipePos = 0;
+    vector<vector<string>> commands;
+    vector<string> currentCommand;
+    
+    // Split the command into separate commands based on the pipe symbol '|'
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "|") {
+            commands.push_back(currentCommand);
+            currentCommand.clear();
+        } else {
+            currentCommand.push_back(args[i]);
+        }
+    }
+    if (!currentCommand.empty()) {
+        commands.push_back(currentCommand);
+    }
+    
+        // Handle piping between commands
+        int numPipes = commands.size() - 1;  // Number of pipes needed
+        int pipefds[2 * numPipes];  // Array to store pipe file descriptors
+        
+        // Create pipes
+        for (int i = 0; i < numPipes; ++i) {
+            if (pipe(pipefds + i * 2) == -1) {
+                perror("pipe");
+                exit(1);
+            }
+        
+        // Fork and execute each command
+        for (int i = 0; i < commands.size(); ++i) {
+            pid_t pid = fork();
+            
+            if (pid == -1) {
+                perror("fork");
+                exit(1);
+            }
+            
+            if (pid == 0) {  // Child process
+                // Handle input redirection for commands except the first one
+                if (i > 0) {
+                    if (dup2(pipefds[(i - 1) * 2], 0) == -1) {  // STDIN
+                        perror("dup2 input");
+                        exit(1);
+                    }
+                }
+
+                // Handle output redirection for commands except the last one
+                if (i < numPipes) {
+                    if (dup2(pipefds[i * 2 + 1], 1) == -1) {  // STDOUT
+                        perror("dup2 output");
+                        exit(1);
+                    }
+                }
+                
+                // Close all pipe file descriptors in the child process
+                for (int j = 0; j < 2 * numPipes; ++j) {
+                    close(pipefds[j]);
+                }
+                
+                // Convert vector to char* array for execvp
+                vector<const char*> cargs;
+                for (const string& arg : commands[i]) {
+                    cargs.push_back(arg.c_str());
+                }
+                cargs.push_back(NULL);  // Null-terminate the array
+
+                // Execute the command
+                if (execvp(cargs[0], const_cast<char* const*>(cargs.data())) == -1) {
+                    perror("execvp");
+                    exit(1);
+                }
+            }
+        }
+        
+        // Parent process: close all pipe file descriptors
+        for (int i = 0; i < 2 * numPipes; ++i) {
+            close(pipefds[i]);
+        }
+
+        // Wait for all child processes to finish
+	if (!isBackground) {
+        	for (int i = 0; i < commands.size(); ++i) {
+            	wait(NULL);
+        	}
+		cout << "Job completed in the foreground." << endl;
+        } else {
+            cout << "Job started in the background." << endl;
+        }
+
+        return;
+    }
+    
+    // If no piping, proceed with regular command execution
+    /*else {
+        vector<const char*> cargs;
+        for (const string& arg : args) {
+            cargs.push_back(arg.c_str());
+        }
+        cargs.push_back(NULL);  // Null-terminate the array
+	pid_t pid = fork();
+    
+        if (pid == -1) {
+            perror("fork");
+            return;
+        }
+
+        if (pid == 0) { // Child process
+        	if (execvp(cargs[0], const_cast<char* const*>(cargs.data())) == -1) {
+            	   perror("execvp");
+            	   exit(1);
+        	}
+    }else { // Parent process
+            if (isBackground) {
+                // Add the job to the background list
+                jobList.push_back({pid, args[0], false});
+                cout << "Job with PID " << pid << " started in the background." << endl;
+            } else {
+                waitpid(pid, NULL, 0);  // Wait for the foreground process to finish
+                cout << "Job with PID " << pid << " completed in the foreground." << endl;
+            }
+        }
+    }*/
     // Handle internal commands like 'round-robin' and 'priority-scheduling' directly
     if (args[0] == "round-robin") {
         if (args.size() == 2) {
@@ -708,6 +1046,14 @@ vector<string> parseInput(const string& input) {
 // Main shell loop
 int main() {
     string input;
+    // Loop until user logs in successfully
+    bool isLoggedIn = false;
+    while (!isLoggedIn) {
+        isLoggedIn = login();  // Try to log in
+    }
+
+    // Display commands based on user role
+    showCommands();
     // Initialize the semaphore for synchronization
     sem_init(&memorySemaphore, 0, 1);  // Binary semaphore to control access
 
